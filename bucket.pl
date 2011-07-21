@@ -33,6 +33,8 @@ use Fcntl qw/:seek/;
 use HTML::Entities;
 use URI::Escape;
 use DBI;
+use XML::Simple;
+use LWP::Simple;
 $Data::Dumper::Indent = 1;
 
 # try to load Math::BigFloat if possible
@@ -62,6 +64,7 @@ my $channel =
   DEBUG
   ? ( &config("debug_channel") || "#bucket" )
   : ( &config("control_channel") || "#billygoat" );
+my $opchannel = "#bucket";
 my ($irc) = POE::Component::IRC::State->spawn();
 my %channels = ( $channel => 1 );
 my $mainchannel = &config("main_channel") || "#xkcd";
@@ -350,9 +353,9 @@ sub irc_on_public {
 
     my $operator = 0;
     if (   $irc->is_channel_member( $channel, $who )
-        or $irc->is_channel_operator( $mainchannel, $who )
-        or $irc->is_channel_owner( $mainchannel, $who )
-        or $irc->is_channel_admin( $mainchannel, $who ) )
+        or $irc->is_channel_operator( $opchannel, $who )
+        or $irc->is_channel_owner( $opchannel, $who )
+        or $irc->is_channel_admin( $opchannel, $who ) )
     {
         $bag{op} = $operator = 1;
     }
@@ -3405,58 +3408,72 @@ sub get_var {
 sub read_rss {
     my ( $url, $re, $tag ) = @_;
 
+    my $xml = undef;
     eval {
-        require LWP::Simple;
-        import LWP::Simple qw/$ua/;
-        require XML::Simple;
-
-        $LWP::Simple::ua->timeout(10);
-        my $rss = LWP::Simple::get($url);
-        if ($rss) {
-            Log "Retrieved RSS";
-            my $xml = XML::Simple::XMLin($rss);
-            for ( 1 .. 5 ) {
-                if ( $xml and my $story = $xml->{channel}{item}[ rand(40) ] ) {
-                    $story->{description} =
-                      HTML::Entities::decode_entities( $story->{description} );
-                    $story->{description} =~ s/$re//isg if $re;
-                    next if $url =~ /twitter/ and $story->{description} =~ /^@/;
-                    next if length $story->{description} > 400;
-                    next if $story->{description} =~ /\[\.\.\.\]/;
-
-                    return ( $story->{description}, $story->{$tag} );
-                }
-            }
-        }
+      $LWP::Simple::ua->timeout(10);
+      my $rss = LWP::Simple::get($url);
+      if ($rss) {
+          Log "Retrieved RSS";
+          $xml = XML::Simple::XMLin($rss);
+      }
     };
 
     if ($@) {
         Report "Failed when trying to read RSS from $url: $@";
         return ();
     }
+
+    if (!$xml) {
+        Report "No XML available for $url";
+        return ();
+    }
+    for ( 1 .. 5 ) {
+        if ( my $story = $xml->{channel}{item}[ rand(40) ] ) {
+            $story->{description} =
+                HTML::Entities::decode_entities( $story->{description} );
+            $story->{description} =~ s/$re//isg if $re;
+            next if $url =~ /twitter/ and $story->{description} =~ /^@/;
+            next if length $story->{description} > 400;
+            next if $story->{description} =~ /\[\.\.\.\]/;
+
+            return ( $story->{description}, $story->{$tag} );
+        }
+    }
+    Report "No data available for $url";
+    return ();
 }
 
-sub get_band_name_handles {
-    if ( exists $handles{dbh} ) {
+{
+    my %handles;
+	sub get_band_name_handles {
+        Log "Creating band name database/query handles";
+        if ( $handles{dbh} )
+        {
+            eval { 
+                if (!$handles{dbh}->ping())
+                {
+                    $handles{dbh} = undef;
+                    $handles{lookup} = undef;
+                }
+            };
+            Report "Ping failure: $@" if $@;
+        }
+        $handles{dbh} ||= DBI->connect( &config("db_dsn"), &config("db_username"), &config("db_password") );
+        if (!$handles{dbh})
+        {
+            Report "Failed to create dbh!";
+            return undef;
+        }
+
+        $handles{lookup} ||= $handles{dbh}->prepare(
+            "select id, word, `lines` 
+                                      from word2id 
+                                      where word in (?, ?, ?) 
+                                      order by `lines`"
+        );
+
         return \%handles;
-    }
-
-    Log "Creating band name database/query handles";
-    unless ( $handles{dbh} ) {
-        $handles{dbh} =
-          DBI->connect( &config("db_dsn"), &config("db_username"),
-            &config("db_password") )
-          or Report "Failed to create dbh!" and return undef;
-    }
-
-    $handles{lookup} = $handles{dbh}->prepare(
-        "select id, word, `lines` 
-                                  from word2id 
-                                  where word in (?, ?, ?) 
-                                  order by `lines`"
-    );
-
-    return \%handles;
+   }
 }
 
 sub check_band_name {
@@ -3511,6 +3528,13 @@ sub check_band_name {
             Log "delaying processing $entry->{word} ($entry->{count})\n";
             $delayed = $entry;
         }
+    }
+	
+	unless (@words) {
+        Log "No words found, new band declared";
+        $bag->{elapsed} = time - $bag->{start};
+        &add_new_band($bag);
+        return;
     }
 
     @words = sort { $a->{next_id} <=> $b->{next_id} } @words;
