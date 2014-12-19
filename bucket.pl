@@ -33,8 +33,6 @@ use Fcntl qw/:seek/;
 use HTML::Entities;
 use URI::Escape;
 use DBI;
-use XML::Simple;
-use LWP::Simple;
 $Data::Dumper::Indent = 1;
 
 # try to load Math::BigFloat if possible
@@ -68,12 +66,7 @@ my $channel =
   &DEBUG
   ? ( &config("debug_channel") || "#bucket" )
   : ( &config("control_channel") || "#billygoat" );
-<<<<<<< HEAD
-my $opchannel = "#bucket";
-my ($irc) = POE::Component::IRC::State->spawn();
-=======
 our ($irc) = POE::Component::IRC::State->spawn();
->>>>>>> 4c927651121b2029ccff11d4c8b75206b24b35e0
 my %channels = ( $channel => 1 );
 my $mainchannel = &config("main_channel") || "#xkcd";
 my %_talking;
@@ -340,22 +333,8 @@ sub irc_on_public {
         $stats{users}{$chl}{$bag{who}}{last_active} = time;
     }
 
-<<<<<<< HEAD
-    unless ( exists $stats{users}{genders}{ lc $who } ) {
-        &load_gender($who);
-    }
-
-    my $operator = 0;
-    if (   $irc->is_channel_member( $channel, $who )
-        or $irc->is_channel_operator( $opchannel, $who )
-        or $irc->is_channel_owner( $opchannel, $who )
-        or $irc->is_channel_admin( $opchannel, $who ) )
-    {
-        $bag{op} = $operator = 1;
-=======
     unless ( exists $stats{users}{genders}{lc $bag{who}} ) {
         &load_gender( $bag{who} );
->>>>>>> 4c927651121b2029ccff11d4c8b75206b24b35e0
     }
 
     # flood protection
@@ -488,9 +467,6 @@ sub irc_on_public {
                 sort keys %{$stats{loaded_plugins}}
               )
         );
-<<<<<<< HEAD
-    } elsif ( $addressed and $msg =~ /^literal(?:\[([*\d]+)\])?\s+(.*)/i ) {
-=======
     } elsif ( $addressed
         and $operator
         and $bag{msg} =~ /^load plugin (\w+)\W*$/i )
@@ -508,7 +484,6 @@ sub irc_on_public {
         &say( $chl => "Okay, $bag{who}. Plugin $1 unloaded." );
     } elsif ( $addressed and $bag{msg} =~ /^literal(?:\[([*\d]+)\])?\s+(.*)/i )
     {
->>>>>>> 4c927651121b2029ccff11d4c8b75206b24b35e0
         my ( $page, $fact ) = ( $1 || 1, $2 );
         $stats{literal}++;
         $fact = &trim($fact);
@@ -2943,9 +2918,6 @@ sub say {
     my $chl  = shift;
     my $text = "@_";
 
-    utf8::encode( $chl ) if utf8::is_utf8( $chl );
-    utf8::encode( $text ) if utf8::is_utf8( $text );
-
     my %data = ( chl => $chl, text => $text );
     return if &signal_plugin( "say", \%data );
     ( $chl, $text ) = ( $data{chl}, $data{text} );
@@ -2977,9 +2949,6 @@ sub say_long {
 sub do {
     my $chl    = shift;
     my $action = "@_";
-
-    utf8::encode( $chl ) if utf8::is_utf8( $chl );
-    utf8::encode( $action ) if utf8::is_utf8( $action );
 
     my %data = ( chl => $chl, text => $action );
     return if &signal_plugin( "do", \%data );
@@ -3335,16 +3304,7 @@ sub get_var {
 sub read_rss {
     my ( $url, $re, $tag ) = @_;
 
-    my $xml = undef;
     eval {
-<<<<<<< HEAD
-      $LWP::Simple::ua->timeout(10);
-      my $rss = LWP::Simple::get($url);
-      if ($rss) {
-          Log "Retrieved RSS";
-          $xml = XML::Simple::XMLin($rss);
-      }
-=======
         require LWP::Simple;
         import LWP::Simple qw/$ua/;
         require XML::Simple;
@@ -3368,74 +3328,35 @@ sub read_rss {
                 }
             }
         }
->>>>>>> 4c927651121b2029ccff11d4c8b75206b24b35e0
     };
 
     if ($@) {
         Report "Failed when trying to read RSS from $url: $@";
         return ();
     }
-
-    if (!$xml) {
-        Report "No XML available for $url";
-        return ();
-    }
-    for ( 1 .. 5 ) {
-        if ( my $story = $xml->{channel}{item}[ rand(40) ] ) {
-            $story->{description} =
-                HTML::Entities::decode_entities( $story->{description} );
-            $story->{description} =~ s/$re//isg if $re;
-            next if $url =~ /twitter/ and $story->{description} =~ /^@/;
-            next if length $story->{description} > 400;
-            next if $story->{description} =~ /\[\.\.\.\]/;
-
-            return ( $story->{description}, $story->{$tag} );
-        }
-    }
-    Report "No data available for $url";
-    return ();
 }
 
-<<<<<<< HEAD
-{
-    my %handles;
-	sub get_band_name_handles {
-        Log "Creating band name database/query handles";
-        if ( $handles{dbh} )
-        {
-            eval { 
-                if (!$handles{dbh}->ping())
-                {
-                    $handles{dbh} = undef;
-                    $handles{lookup} = undef;
-                }
-            };
-            Report "Ping failure: $@" if $@;
-        }
-        $handles{dbh} ||= DBI->connect( &config("db_dsn"), &config("db_username"), &config("db_password") );
-        if (!$handles{dbh})
-        {
-            Report "Failed to create dbh!";
-            return undef;
-        }
-=======
+sub get_band_name_handles {
+    if ( exists $handles{dbh} ) {
+        return \%handles;
+    }
+
+    Log "Creating band name database/query handles";
+    unless ( $handles{dbh} ) {
+        $handles{dbh} =
+          DBI->connect( &config("db_dsn"), &config("db_username"),
+            &config("db_password") )
+          or Report "Failed to create dbh!" and return undef;
+    }
+
     $handles{lookup} = $handles{dbh}->prepare(
         "select id, word, `lines`
          from word2id
          where word in (?, ?, ?)
          order by `lines`"
     );
->>>>>>> 4c927651121b2029ccff11d4c8b75206b24b35e0
 
-        $handles{lookup} ||= $handles{dbh}->prepare(
-            "select id, word, `lines` 
-                                      from word2id 
-                                      where word in (?, ?, ?) 
-                                      order by `lines`"
-        );
-
-        return \%handles;
-   }
+    return \%handles;
 }
 
 sub check_band_name {
@@ -3490,13 +3411,6 @@ sub check_band_name {
             Log "delaying processing $entry->{word} ($entry->{count})\n";
             $delayed = $entry;
         }
-    }
-	
-	unless (@words) {
-        Log "No words found, new band declared";
-        $bag->{elapsed} = time - $bag->{start};
-        &add_new_band($bag);
-        return;
     }
 
     @words = sort { $a->{next_id} <=> $b->{next_id} } @words;
@@ -3811,15 +3725,4 @@ sub validate_factoid {
     return 1;
 }
 
-<<<<<<< HEAD
-sub open_log {
-    if ( &config("logfile") ) {
-        my $logfile = DEBUG ? &config("logfile") . ".debug" : &config("logfile");
-        open( LOG, ">>", $logfile)
-          or die "Can't write " . &config("logfile") . ": $!";
-        Log("Opened $logfile");
-    }
-}
-=======
 # vim: set sw=4
->>>>>>> 4c927651121b2029ccff11d4c8b75206b24b35e0
