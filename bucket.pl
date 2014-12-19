@@ -69,6 +69,7 @@ my $channel =
 our ($irc) = POE::Component::IRC::State->spawn();
 my %channels = ( $channel => 1 );
 my $mainchannel = &config("main_channel") || "#xkcd";
+my $opchannel = &config("control_channel") || "#bucket";
 my %_talking;
 my %fcache;
 my %stats;
@@ -307,9 +308,9 @@ sub irc_on_public {
 
     $bag{op} = 0;
     if (   $irc->is_channel_member( $channel, $bag{who} )
-        or $irc->is_channel_operator( $mainchannel, $bag{who} )
-        or $irc->is_channel_owner( $mainchannel, $bag{who} )
-        or $irc->is_channel_admin( $mainchannel, $bag{who} ) )
+        or $irc->is_channel_operator( $opchannel, $bag{who} )
+        or $irc->is_channel_owner( $opchannel, $bag{who} )
+        or $irc->is_channel_admin( $opchannel, $bag{who} ) )
     {
         $bag{op} = 1;
     }
